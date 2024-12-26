@@ -1,0 +1,234 @@
+<html>
+    <head>
+        <title>Marching Cubes - WebGL</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+                position: relative;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1024" width="1024"></canvas>
+            <button id="start">start</button>
+        </section>
+    </body>
+    <script>
+    // https://en.wikipedia.org/wiki/Jump_flooding_algorithm
+    // https://www.comp.nus.edu.sg/~tants/jfa.html
+    // JS implementation for a voronoi diagram using the jump flood algorithm.
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const { width, height } = canvas;
+
+    const DIMENSIONS = 1024;
+    
+    const PIXELS = new Array(DIMENSIONS);
+    for (let i = 0; i < DIMENSIONS; i++) {
+        PIXELS[i] = new Uint8Array(DIMENSIONS);
+    }
+
+    // Keep adding more to this to create a more detailed diagram.
+    const SEED_TO_COLOUR = [
+        'red',
+        'orange',
+        'yellow',
+        'green',
+        'blue',
+        'indigo',
+        'pink',
+        'white',
+        'purple',
+        'cyan',
+        'violet',
+    ];
+
+    const SEED_COLOUR_TO_LOCATION = new Array(SEED_TO_COLOUR.length + 1);
+
+    function randomInRange(min, max) {
+        return Math.floor(min + Math.random() * (max - min));
+    }
+
+    function distance(v1, v2) {
+        return Math.sqrt((v2.x - v1.x) ** 2 + (v2.y - v1.y) ** 2);
+    }
+
+    function updateNeighbours(x, y, k, SEED_COLOUR_TO_LOCATION) {
+        for (let i = -k; i <= k ; i += k) {
+            for (let j = -k; j <= k; j += k) {
+                const qx = x + i;
+                const qy = y + j;
+
+                if (qx < 0 || qy < 0 || qx >= DIMENSIONS || qy >= DIMENSIONS) {
+                    // Out of range.
+                    continue;
+                }
+                
+                // Don't store p as a variable or q since they may change as we iterate.
+
+                if (PIXELS[x][y] === 0) {
+                    // Change p's colour to q.
+                    PIXELS[x][y] = PIXELS[qx][qy];
+                } else if (PIXELS[x][y] !== 0 && PIXELS[qx][qy] !== 0) {
+                    const pSeed = SEED_COLOUR_TO_LOCATION[PIXELS[x][y]];
+                    const qSeed = SEED_COLOUR_TO_LOCATION[PIXELS[qx][qy]];
+                    
+                    const d1 = distance({ x, y }, pSeed);
+                    const d2 = distance({ x, y }, qSeed);
+                    
+                    if (d1 > d2) {
+                        // Change p's colour to q.
+                        PIXELS[x][y] = PIXELS[qx][qy];
+                    }
+                }
+            }
+        }
+    }
+    
+    function generate() {
+        // Pick seed values:
+        // 0 is reserved for unfilled.
+        for (let i = 1; i < SEED_TO_COLOUR.length + 1; i++) {
+            const x = randomInRange(0, DIMENSIONS);
+            const y = randomInRange(0, DIMENSIONS);
+            // PIXELS[x][y] = SEED_TO_COLOUR[i];
+            // const seedColour = SEED_TO_COLOUR[i];
+            PIXELS[x][y] = i;
+            SEED_COLOUR_TO_LOCATION[i] = { x, y };
+        }
+
+        // Start iterating over all the pixels in multiple passes,
+        // checking nearby neighbours, and flipping colours.
+        // while (updated) {
+        // e.g. 2^8 would be 256.
+        for (let kDenominator = 1; kDenominator <= Math.log2(DIMENSIONS); kDenominator++) {
+            for (let x = 0; x < DIMENSIONS; x++) {
+                for (let y = 0; y < DIMENSIONS; y++) {
+                    const k = DIMENSIONS / (2 ** kDenominator);
+                    updateNeighbours(x, y, k, SEED_COLOUR_TO_LOCATION);
+                }
+            }
+        }
+    }
+
+    function canvasToCartesian(x, y, dimx, dimy) {
+        return {
+            x: x - dimx * 0.5,
+            y: y - dimy * 0.5,
+        };
+    }
+
+    function draw() {
+        generate();
+        // Fill now that we've generated the voronoi
+        for (let x = 0; x < DIMENSIONS; x++) {
+            for (let y = 0; y < DIMENSIONS; y++) {
+                const colourIndex = PIXELS[x][y];
+                const fillStyle = SEED_TO_COLOUR[colourIndex - 1];
+
+                ctx.fillStyle = fillStyle;
+                ctx.fillRect(x, y, 1, 1);
+                // const centre = SEED_COLOUR_TO_LOCATION[colourIndex];
+                // const distanceToCentre = distance({ x, y }, centre);
+                // const maxDistance = 512;
+                // const opacity = 1 - distanceToCentre / maxDistance;
+                
+                // // Go canvas to cartesian because dumb.
+                // const centreCartesian = canvasToCartesian(centre.x, centre.y, DIMENSIONS, DIMENSIONS);
+                // const coordCartersian = canvasToCartesian(x, y, DIMENSIONS, DIMENSIONS);
+                // const angle = -Math.atan2(
+                //     coordCartersian.y - centreCartesian.y,
+                //     coordCartersian.x - centreCartesian.x
+                // );
+
+                // // It's like backwards...
+                // const isQ1 = angle >= 0 && angle <= Math.PI/2;
+                // const isQ2 = angle > Math.PI/2;
+                // const isQ3 = angle < -Math.PI/2;
+                // const isQ4 = -Math.PI/2 <= angle && angle <= 0;
+                // // if (angle > 0 ) {
+                // // if (isQ1) {
+                // //     ctx.fillStyle = `rgba(255, 0, 0, ${opacity})`;
+                // // } else if (isQ2) {
+                // //     // ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
+                // //     ctx.fillStyle = `rgba(0, 0, 255, ${opacity})`;
+                // // } else if (isQ3) {
+                // //     ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
+                // //     // dark
+                // // } else if (isQ4) {
+                // //     ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+                // // }
+
+                // if (isQ1 || isQ2) {
+                //     // Q1 and Q2 go from [0, Math.PI]
+                //     // Figure out how far along we are from [0, Math.PI], peak at Math.PI/2
+                //     // Going to [0, Math.PI] to [0, Math.PI/2, Math.PI] -> [0, 1, 0] 
+                //     const normalized = 1 - Math.abs((angle - Math.PI/2)) / Math.PI;
+                //     const colour = normalized * 255;
+                //     ctx.fillStyle = `rgba(${colour}, ${colour}, ${colour}, ${opacity})`;
+                // }
+                // if (isQ3 || isQ4) {
+                //     // Q3 and Q4 go from [-Math.PI, 0]
+                //     // Figure out how far along we are from [-Math.PI, 0], peak at Math.-PI/2
+                //     // Going to [-Math.PI, 0] to [-Math.PI, -Math.PI/2, 0] -> [0, 1, 0]
+                //     const normalized = 1 - Math.abs((angle + Math.PI/2)) / Math.PI;
+                //     const colour = normalized * 255;
+                //     ctx.fillStyle = `rgba(${colour}, ${colour}, ${colour}, ${opacity})`;
+                // }
+        
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+
+        // draw conic gradient at centre to simulate lighting. should use atan2 + angles to
+        // make this in a shader, where atan2 gets the angle, the angle gives which colour
+        // at which degree, and the distance gives the opacity of the colour as we move away
+        // from the centre.
+        // Object.keys(SEED_COLOUR_TO_LOCATION).forEach(k => {
+        //     const centre = SEED_COLOUR_TO_LOCATION[k];
+        //     // Add five color stops
+        //     const gradient = ctx.createConicGradient(0, centre.x, centre.y);
+        //     gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        //     gradient.addColorStop(0.25, 'rgba(255, 255, 255, 1)');
+        //     gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0)');
+        //     gradient.addColorStop(0.75, 'rgba(0, 0, 0, 1)');
+        //     gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
+        //     ctx.fillStyle = gradient;
+        //     ctx.beginPath();
+        //     ctx.arc(centre.x, centre.y, 50, 0, Math.PI * 2, false);
+        //     ctx.fill();
+        // });
+
+    }
+
+    // draw();
+
+    document.getElementById('start').onclick = () => {
+        draw();
+    }
+
+    // const update = (timestamp) => {
+    //     // After marching we can then update the visualization.
+    //     // const time = timestamp * 0.00025;
+    //     const time = timestamp * 0.0003;
+    //     // draw(time);
+    //     window.requestAnimationFrame(update);
+    // }
+
+    // window.requestAnimationFrame(update);
+
+    </script>
+</html>

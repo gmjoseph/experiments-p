@@ -1,0 +1,115 @@
+<html>
+    <head>
+        <title>Optimization - Rectangle Inscribed in Semicircle</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                max-height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1280" width="1280"></canvas>
+        </section>
+    </body>
+    <script>
+
+    const { cos, sin, PI, sqrt } = Math;
+    const TWO_PI = PI * 2;
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const { width, height } = canvas;
+    const state = {
+        radius: width * 0.3,
+    };
+    // https://www.geogebra.org/m/UkKxZSaj Cool
+
+    function setup() {
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw grid horizontals
+        const subdivisons = 20;
+        const verticalSteps = height / subdivisons;
+        for (let i = 0; i <= height; i += verticalSteps) {
+            ctx.beginPath();
+            ctx.moveTo(0, i);
+            ctx.lineTo(width, i);
+            ctx.strokeStyle = 'gray';
+            ctx.stroke();
+        }
+
+        // Draw grid vertical lines, divided by the number of cycles.
+        const horizontalSteps = width / subdivisons;
+        for (let i = 0; i <= width; i += horizontalSteps) {
+            ctx.beginPath();
+            ctx.moveTo(i, 0);
+            ctx.lineTo(i, height);
+            ctx.strokeStyle = 'gray';
+            ctx.stroke();
+        }
+    }
+
+    function drawSemicircle() {
+        const { radius } = state;
+        const cx = width * 0.5;
+        const cy = height * 0.5;
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, PI, true);
+        // Diameter closing the semicircle.
+        ctx.moveTo(cx - radius, cy);
+        ctx.lineTo(cx + radius, cy);
+        ctx.stroke();
+    }
+
+    function drawRectangle() {
+        // We compute one edge of the rectangle using the radius, so
+        // as to maximize the the rectangle inscribed in the circle.
+        const { radius } = state;
+        const r2 = radius * radius;
+        const rectHeight = sqrt(2 * r2 / 4);
+        const rectHalfWidth = sqrt(r2 - rectHeight * rectHeight);
+
+        const bl = { x: width * 0.5 - rectHalfWidth, y: height * 0.5 };
+        const br = { x: width * 0.5 + rectHalfWidth, y: height * 0.5 };
+        const tr = { x: width * 0.5 + rectHalfWidth, y: height * 0.5 - rectHeight };
+        const tl = { x: width * 0.5 - rectHalfWidth, y: height * 0.5 - rectHeight };
+
+        ctx.strokeStyle = 'green';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(bl.x, bl.y);
+        ctx.lineTo(br.x, br.y);
+        ctx.lineTo(tr.x, tr.y);
+        ctx.lineTo(tl.x, tl.y);
+        ctx.lineTo(bl.x, bl.y);
+        ctx.stroke();
+    }
+
+    function draw() {
+        drawSemicircle();
+        drawRectangle();
+    }
+
+    function main() {
+        setup();
+        draw();
+    }
+
+    main();
+    </script>
+</html>

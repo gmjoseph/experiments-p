@@ -1,0 +1,231 @@
+<html>
+    <head>
+        <title>Least Squares Alignment - Canvas</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                max-height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1024" width="1024"></canvas>
+        </section>        
+    </body>
+    <script src="../lib/ml-matrix.js"></script>
+    <script>
+        const { Matrix, solve } = window['ml-matrix'];
+        
+    /**
+     * Needs browserified ml-matrix npm module
+     * 
+     * using browserify:
+     * browserify _browserify-ml-matrix.js -o lib/ml-matrix.js
+     * see:
+     * https://www.webtips.dev/use-npm-modules-in-your-browser
+     *
+     * const matrix = require('../node_modules/ml-matrix')
+     *
+     * will be this object on the window when imported with script src="lib/ml-matrix.js"
+     * window['ml-matrix'] = matrix;
+     */
+
+    // wip
+    // https://mljs.github.io/matrix/#least-square
+
+    // other resources:
+    // https://dracoblue.net/dev/linear-least-squares-in-javascript/
+    // https://mathworld.wolfram.com/LeastSquaresFitting.html
+    // https://textbooks.math.gatech.edu/ila/least-squares.html
+
+    // closest implementation: https://ros-developer.com/2017/12/26/finding-affine-transform-with-linear-least-squares/
+    // https://stackoverflow.com/questions/11687281/transformation-between-two-set-of-points
+
+    // https://stackoverflow.com/questions/1114257/transform-a-triangle-to-another-triangle
+    // https://stackoverflow.com/questions/55546892/transform-points-from-one-triangle-to-another-triangle
+    // https://math.stackexchange.com/questions/186286/get-transformation-matrix-from-points
+    class Point {
+
+    }
+
+    class Viz {
+        constructor() {
+            this.canvas = document.getElementById('canvas');
+            this.ctx = canvas.getContext('2d');
+        }
+
+        drawPoints(points, colour) {
+            const { ctx } = this;
+            ctx.strokeStyle = colour;
+
+            ctx.beginPath();
+            points.forEach(([x, y], i) => {
+                if (i == 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.closePath();
+            ctx.stroke();
+        }
+    }
+
+    const { width, height } = document.getElementById('canvas');
+    
+    const viz = new Viz();
+
+    function update(l, r, computed) {
+        // run update in response to user actions.
+        console.log(l);
+        console.log(r);
+        viz.drawPoints(l, 'red');
+        viz.drawPoints(r, 'blue');
+
+        // transformed points to put l over r.
+        const lt = l.map(([x, y]) => {
+            // source to use the 3x3 matrix to transform each point
+            // https://github.com/toji/gl-matrix/blob/master/src/vec2.js#L424-L448
+            // be careful since those are column major and we're dealing with row major.
+            // let x = a[0];
+            // let y = a[1];
+            // out[0] = m[0] * x + m[3] * y + m[6];
+            // out[1] = m[1] * x + m[4] * y + m[7];
+            const { m3 }  = computed;
+            const xt = m3[0][0] * x + m3[0][1] * y + m3[0][2];
+            const yt = m3[1][0] * x + m3[1][1] * y + m3[1][2];
+            return [xt, yt];
+        });
+        console.log(lt);
+        viz.drawPoints(lt, 'green');
+    }
+
+    function compute (l, r) {
+        // linear least squares:
+        // e.g.:
+        // left, right sides of points we want to match
+        // l = [ [1, 2], [3,4], [5, 6] ]
+        // r = [ [0, -2,], [4, 3], [6, 6] ]
+        // retrieves the xformation to place l over r.
+
+        // lls - linear least squares
+        // given a matrix A (the l matrix) and a vector b
+        // (the r matrix), find a matrix x so that Ax = b
+        // in other words, find the transformation matrix that we can use to align
+        // each point in matrix A to vector b by solving for x
+        // https://math.stackexchange.com/questions/2136719/least-squares-fit-to-find-transform-between-points
+
+        // TODO
+        // see if this can be extended to more points, like an l[4]
+        // and l[5] and so on to reduce error?
+        // do the same for the b matrix.
+        const lPoints = [
+            // point 1
+            [
+                ...l[0], 0, 0, 1, 0,
+            ],
+            [
+                0, 0, ...l[0], 0, 1,
+            ],
+            // point 2
+            [
+                ...l[1], 0, 0, 1, 0,
+            ],
+            [
+                0, 0, ...l[1], 0, 1,
+            ],
+            // point 3
+            [
+                ...l[2], 0, 0, 1, 0,
+            ],
+            [
+                0, 0, ...l[2], 0, 1,
+            ],
+        ];
+        if (l[3]) {
+            lPoints.push(
+                [
+                    ...l[3], 0, 0, 1, 0,
+                ],
+            )
+            lPoints.push(
+                [
+                    0, 0, ...l[3], 0, 1,
+                ],
+            )
+        }
+        const A = new Matrix(lPoints);
+
+        // row-major is needed
+        let rPoints = [
+            ...r[0],
+            ...r[1],
+            ...r[2],
+            // ...r[3],
+        ]
+        if (r[3]) {
+            rPoints = [...rPoints, ...r[3]];
+        }
+        // console.log(lPoints);
+        const b = new Matrix([rPoints]).transpose();
+
+        // console.log(A);
+        // console.log(b);
+        const x = solve(A, b);
+        const error = Matrix.sub(b, A.mmul(x)) // error enables us to evaluate ...?
+        console.log(x);
+
+        // 3x3 xformation matrix
+        const m3 = [
+            [x.get(0, 0), x.get(2, 0), x.get(4, 0)],
+            [x.get(1, 0), x.get(3, 0), x.get(5, 0)],
+            [0, 0, 1],
+        ];
+
+        // 4x4 xformation matrix, as usual t(x,y) for translate is in the last column
+        const m4 = [
+            [x.get(0, 0), x.get(2, 0), 0, x.get(4, 0)],
+            [x.get(1, 0), x.get(3, 0), 0, x.get(5, 0)],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+        ];
+
+        // interop with css,canvas
+        const webMatrix = [
+            [x.get(0, 0), x.get(2, 0), x.get(1, 0)],
+            [x.get(3, 0), x.get(4, 0), x.get(5, 0)],
+        ];
+
+        // should both be ... row-major?
+        console.log(m3);
+        console.log(m4);
+
+        return { m3, m4, webMatrix };
+    }
+
+    let l = [ [1, 2], [3, 4], [5, 6]]
+    let r = [ [2, 3], [4, 5], [6, 7]]
+    compute(l, r);
+    // l = [ [1, 2], [3, 4], [5, 6], [7, 8] ]
+    // r = [ [2, 3], [4, 5], [6, 7], [8, 9] ]
+    // compute(l, r);
+
+    // todo
+    // not sure if best use-case, we want a square fit but the triangle is kind of warped so...
+    l = [ [width/8, height/8], [width/2, height/8], [width/4, height/2], ];
+    r = [ [width/8 * 0.5 + 200, height/8 * 0.5 + 200], [width/2 + 200, height/8 + 200], [width/4 + 200, height/2 + 200], ];
+    update(l, r, compute(l, r));
+
+    </script>
+</html>

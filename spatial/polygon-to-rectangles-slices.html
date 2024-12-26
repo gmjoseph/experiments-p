@@ -1,0 +1,464 @@
+<html>
+    <head>
+        <title>Polygon -> Rectangles</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                max-height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1280" width="1280"></canvas>
+        </section>
+    </body>
+    <script>
+
+    // Picking a random huge number value that would be at the canvas 'extremes'
+    // (think of it like going to infinity), this will obviously break if the canvas
+    // this big. Not sure we can use Infinity but that might be better?
+    const FAR = 1000000000;
+
+    class MathTools {
+        // Gonna need:
+        // - vector2,
+        // - line-line intersection
+        // - parametric lines probably so we can do x0 + dx(t) where t is the length along the line.
+        // - line subdivision
+        static distance(p1, p2) {
+            const [x1, y1] = p1;
+            const [x2, y2] = p2;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            return d;
+        }
+
+        static midpoint(p1, p2) {
+            const [x1, y1] = p1;
+            const [x2, y2] = p2;
+            const mx = (x2 + x1) * 0.5;
+            const my = (y2 + y1) * 0.5;
+            return [mx, my];
+        }
+
+        static slope(p1, p2) {
+            const [x1, y1] = p1;
+            const [x2, y2] = p2;
+            const m = (y2 - y1) / (x2 - x1);
+            return m;
+        }
+
+        static lineIntersection(s1, s2) {
+            // https://stackoverflow.com/a/1968345
+            // Ported from C to js.
+            const { start: p0, end: p1 }  = s1;
+            const { start: p2, end: p3 }  = s2;
+
+            const [p0x, p0y] = p0;
+            const [p1x, p1y] = p1;
+            const [p2x, p2y] = p2;
+            const [p3x, p3y] = p3;
+
+            let s1x = null;
+            let s1y = null;
+            let s2x = null;
+            let s2y = null;
+            let s = null;
+            let t = null;
+
+            s1x = p1x - p0x;
+            s1y = p1y - p0y;
+            s2x = p3x - p2x;
+            s2y = p3y - p2y;
+
+            s = (-s1y * (p0x - p2x) + s1x * (p0y - p2y)) / (-s2x * s1y + s1x * s2y);
+            t = ( s2x * (p0y - p2y) - s2y * (p0x - p2x)) / (-s2x * s1y + s1x * s2y);
+
+            if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+                return [
+                    p0x + (t * s1x),
+                    p0y + (t * s1y),
+                ];
+            }
+            return null;
+        }
+
+        static longestSegment(segments) {
+            return segments.reduce((longest, next) => (
+                !longest || longest.length < next.length ? next : longest
+            ), null);
+        }
+    };
+
+    class Segment {
+        constructor(p1, p2) {
+            this.start = p1;
+            this.end = p2;
+            this.length = MathTools.distance(p1, p2);
+            this.slope = MathTools.slope(p1, p2);
+            // Is it more vertical or more horizontal-oriented?
+            this.orientation = this.slope < 1 ? Segment.Orientation.Horizontal : Segment.Orientation.Vertical;
+            this.isHorizontal = this.orientation === Segment.Orientation.Horizontal;
+            this.isVertical = !this.isHorizontal;
+        }
+
+        static Orientation = { Horizontal: 'horizontal', Vertical: 'vertical' };
+
+        get directionalRays() {
+            // Generates segments that go NESW from each vertex vertex of the segment.
+            // There should be 8 total.
+            const { start, end } = this;
+            const rayPairs = [
+                // Leftwards
+                new Segment(start, [0, start[1]]),
+                new Segment( end,[0, end[1]]),
+                // Rightwards
+                new Segment(start, [FAR, start[1]]),
+                new Segment( end,[FAR, end[1]]),
+                // Upwards
+                new Segment(start, [start[0], 0]),
+                new Segment( end,[end[0], 0]),
+                // Downwards
+                new Segment(start, [start[0], FAR]),
+                new Segment( end,[end[0], FAR]),
+            ];
+            return rayPairs;
+        }
+
+        trim(where) {
+            // Shrinks the segment up to 'where'
+            return new Segment(this.start, where);
+            // this.slope = MathTools.slope(p1, p2);
+            // // Is it more vertical or more horizontal-oriented?
+            // this.orientation = this.slope < 1 ? Segment.Orientation.Horizontal : Segment.Orientation.Vertical;
+            // this.isHorizontal = this.orientation === Segment.Orientation.Horizontal;
+            // this.isVertical = !this.isHorizontal;
+        }
+
+        subdivide(where) {
+            const s1 = new Segment(this.start, where);
+            const s2 = new Segment(where, this.end);
+            return [s1, s2];
+        }
+    }
+
+    class Polygon {
+        constructor() {
+            this.restart();
+        }
+
+        addNextPoint(x, y) {
+            const { points } = this;
+            // Pointless if we don't have at least 3 points and we're adding a 4th (which would close a tri)
+            if (points.length < 3) {
+                this.points.push([x, y]);
+                return;
+            }
+            // Close shape if we're epsilon units away from x, y to any polygon point.
+            const epsilon = 20;
+
+            // Closing to the first point only.
+            const d = MathTools.distance([x, y], points[0]);
+            if (d < epsilon) {
+                this.close();
+            } else {
+                this.points.push([x, y]);
+            }
+        }
+
+        createSegments() {
+            // Creates segments from points that are easy to work with.
+            // we need to be able to get the slope since we only want infinite or 0 sloped
+            // lines (those form the square).
+            for (let i = 0; i < this.points.length - 1; i++) {
+                const segment = new Segment(
+                    this.points[i],
+                    this.points[i + 1],
+                );
+                this.segments.push(segment);
+            }
+            if (this.segments.length + 1 !== this.points.length) {
+                throw new Error("Mismatched segments for points.");
+            }
+
+            // TODO
+            // It would help to track whcih segments are attached to which point (vertex)
+            // so that we can trace out from them and build rectangles afterwards.
+        }
+
+        close() {
+            this.closed = true;
+            // Close at the nearest point
+            this.points.push(this.points[0]);
+            this.createSegments();
+            this.subdivide();
+        }
+
+        subdivideSegments(segment) {
+            const nextSegments = [];
+            this.segments.forEach(segment => {
+                const rayPairs = segment.directionalRays;
+                rayPairs.forEach(ray => {
+                    this.rays.push(ray)
+                    this.segments.forEach(targetSegment => {
+                        if (segment === targetSegment) {
+                            return;
+                        }
+                        const intersectionPoint = MathTools.lineIntersection(ray, targetSegment);
+                        if (!intersectionPoint) {
+                            return;
+                        }
+
+                        // TODO
+                        // FIXME - this won't work when there is a vertex at the edge of a concave
+                        // area, which will then draw the subdivison up to a line through the convex space.
+
+                        // If we take the ray that caused the hit and subdivide it at the intersection
+                        // point, we have our new line that splits the polygon. We can then take
+                        // the length of that line and that is the distance of how far it was to the
+                        // intersection point
+                        const cut = ray.trim(intersectionPoint);
+                        if (cut.length <= 0) {
+                            // TODO
+                            // Make this better.
+                            // It intersected with a shared vertex.
+                            return;
+                        }
+                        
+                        // TODO
+                        // There should be a way to get the farthest segment that is
+                        // not blocked by other segments...
+                        // We might have to put all the hits per rayPair in an array
+                        // then take the first out of each array and see which is furthest.
+                        // Might be good enough just taking closest for now...
+
+                        // Trying to maximize the cut size without cutting through
+                        // multiple lines. This is why we pick the closest?
+                        const subdivided = targetSegment.subdivide(intersectionPoint);
+                        nextSegments.push(subdivided[0]);
+                        nextSegments.push(subdivided[1]);
+
+                        // TODO
+                        // It would help to track whcih segments are attached to which point (vertex)
+                        // so that we can trace out from them and build rectangles afterwards.
+
+                        // if (!segmentHit || cut.length < distance) {
+                        //     hitPoint = intersectionPoint;
+                        //     segmentHit = targetSegment;
+                        //     distance = cut.length;
+                        //     segmentSubdivision = cut;
+                        // }
+                    });
+                });
+            });
+            console.log(nextSegments);
+            return nextSegments;
+        }
+
+        subdivide() {
+            // https://gamedev.stackexchange.com/questions/63351/subdividing-a-polygon-into-boxes-of-varying-size
+            // http://procworld.blogspot.nl/2011/07/city-lots.html
+            // DIFFERENT IDEA based on slicing:
+            // At each vertex:
+            // cut up, down, left, right.
+            // See what happens to the shape after and whether we can then make rects out of all that junk.
+
+            // Slice up the entire thing in one pass
+            // This should add new verts beteween the others.
+            // We now have a new polygon.
+            // Slice again with the new verts added.
+
+            // another idea: draw the lines out from the vert. then follow which one hits what
+            // then keep following them by changing their direction until they come back the same
+            // way and a square is made.
+
+            // TODO
+            // Basically start splitting it up, but make sure to add segments and verts when
+            // intersecting with the rays.
+            // then if a vert has multiply segments on it it might be possible to make it into
+            // a rect but we can check each segment (or we can mark them up front if they came
+            // from slicing with rays), that it is axis aligned (unlike say the polygon's segments
+            // though some might be if it's super accurate).
+            
+            // Yet another idea:
+            // * draw a bounding rect around the polygon.
+            // * make into squares
+            // * there is now a grid behind the shape.
+            // * reject any squares outside the polygon (how do we know?)
+            // * accept any inside the polygon (how do we know? ray trace to an edge and see if we
+            // get to the canvas edge before the edge of the polygon maybe)
+            // * after reducing to set of squares they can be merged together into larger shapes.
+            const iterations = 1;
+            for (let i = 0; i < iterations; i++) {
+                const nextSegments = this.subdivideSegments();
+                this.segments = nextSegments;
+            }
+        }
+
+        restart() {
+            this.closed = false;
+            this.points = [];
+            this.segments = [];
+            this.lineSegments = [];
+            this.rays = [];
+        }
+    }
+
+    class Viz {
+        constructor(polygon) {
+            this.canvas = document.getElementById('canvas');
+            this.ctx = canvas.getContext('2d');
+            this.polygon = polygon;
+
+            this.canvas.onclick = this.handleClick;
+            this.clear();
+        }
+        
+        handleClick = (e) => {
+            if (this.polygon.closed) {
+                // Restart the shape with a new one if we're drawing again after closing.
+                this.polygon.restart();
+            }
+            
+            const { closed, polygon } = this.polygon;
+            const { x, y } = e.target.getBoundingClientRect();
+            const { layerX, layerY } = e;
+            // Local coordinates - probably a better way but whatever.
+            const cx = layerX - x;
+            const cy = layerY - y;
+            this.polygon.addNextPoint(cx, cy);
+            this.update();
+        };
+
+        clear() {
+            const { canvas, ctx } = this;
+            const { width, height } = canvas;
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        drawPolygon() {
+            const { ctx } = this;
+            const { closed, points } = this.polygon;
+            ctx.beginPath();
+            points.forEach((p, i) => {
+                const [x, y] = p;
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+                ctx.arc(x, y, 2, 0, Math.PI * 2);
+            });
+            ctx.strokeStyle = closed ? 'green' : 'blue';
+            ctx.fillStyle = closed ? 'rgba(0, 255, 0, 0.2)' : 'transparent';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            ctx.fill();
+
+            // Circle at each point of the points.
+            points.forEach((p, i) => {
+                const [x, y] = p;
+                ctx.beginPath();
+                // Circle at each point of the points.
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'red';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 3;
+                ctx.fill();
+                ctx.stroke();
+            });
+        }
+
+        drawRays() {
+            if (!this.polygon.closed) {
+                return;
+            }
+            const { rays } = this.polygon;
+            const { ctx } = this;
+
+            rays.forEach(ls => {
+                const fillPoint = (p) => {
+                    const [x, y] = p;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = 'red';
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 3;
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                const { start: p1, end: p2 } = ls;
+                ctx.beginPath();
+                ctx.moveTo(p1[0], p1[1]);
+                ctx.lineTo(p2[0], p2[1]);
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                fillPoint(p1);
+                fillPoint(p2);
+            });
+        }
+
+        drawSegments() {
+            if (!this.polygon.closed) {
+                return;
+            }
+            const { segments } = this.polygon;
+            const { ctx } = this;
+
+            segments.forEach(ls => {
+                const fillPoint = (p) => {
+                    const [x, y] = p;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = 'red';
+                    ctx.strokeStyle = 'black';
+                    ctx.lineWidth = 3;
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                const { start: p1, end: p2 } = ls;
+                ctx.beginPath();
+                ctx.moveTo(p1[0], p1[1]);
+                ctx.lineTo(p2[0], p2[1]);
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                fillPoint(p1);
+                fillPoint(p2);
+            });
+        }
+
+        // Add polygon drawing...
+        update() {
+            this.clear();
+            this.drawPolygon();
+            // TODO
+            // Remove this and make it a proper animation.
+            this.drawRays();
+            this.drawSegments();
+        }
+    }
+
+    const polygon = new Polygon();
+    const viz = new Viz(polygon);
+
+    </script>
+</html>

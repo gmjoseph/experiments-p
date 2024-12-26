@@ -1,0 +1,178 @@
+<html>
+    <head>
+        <title>Gradient Descent</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                max-height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1280" width="1280"></canvas>
+        </section>
+    </body>
+    <script>
+
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const { width, height } = canvas;
+
+    
+    function setup() {
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, width, height);
+    }
+    
+    function drawContourPlot(ks, kf) {
+        const toCanvas = (x, y) => [width * 0.5 + x, height * 0.5 + y];
+        // Draws the k = f(x, y).
+        // In this case we pick the k so that it's no longer in R3 but instead we visualize what
+        // it would be if R3 were flattened to R2. I.e., it's just level curves.
+        const steps = 50;
+        const step = (Math.PI * 2) / steps;
+
+        ks.forEach(k => {
+            for (let theta = 0; theta <= Math.PI * 2; theta += step) {
+                const [ax, ay] = kf(theta, k);
+                const [x, y] = toCanvas(ax, ay);
+                if (theta === 0) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, y);
+                    continue;
+                }
+                ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        });
+    }
+
+    function gradientDescent(gf) {
+        // note:
+        // not stochastic because
+        // 1. randomized vx and vy to start.
+        // 2. randomized learningRate.
+        // as a result, descent iterations/positions could vary between runs
+
+        // small positive parameter
+        let learningRate = 0.01;
+
+        // small value to test closeness to global minimum
+        const epsilon = 0.0001;
+
+        const maxIterations = 500;
+        let iteration = 0;
+
+        // Guess a random v
+        const points = [];
+        let vx = Math.random() * width * 0.3;
+        let vy = Math.random() * height * 0.3;
+        points.push([vx, vy]);
+
+        let [dfdx, dfdy] = gf(vx, vy);
+        let magnitude = Math.sqrt(dfdx ** 2 + dfdy ** 2);
+
+        while (iteration < maxIterations && magnitude > epsilon) {
+            // compute next values
+            vx = vx - learningRate * dfdx;
+            vy = vy - learningRate * dfdy;
+            [dfdx, dfdy] = gf(vx, vy);
+            magnitude = Math.sqrt(dfdx ** 2 + dfdy ** 2);
+            points.push([vx, vy]);
+            // vary the learning rate?
+            learningRate = Math.random() * 0.1;
+            iteration++;
+        }
+
+        console.log(`completed after ${iteration} iterations`);
+        console.log(points);
+        return points;
+    }
+
+    function drawDescent(descent) {
+        // we want 0, 0 to be the centre.
+        // TODO
+        // This is wrong anyway, because in this case it will awlays come down in QII
+        // but if we do the toCanvas in another way it may always come back to centre from
+        // QIV...
+        const toCanvas = (x, y) => [width * 0.5 - x, height * 0.5 - y];
+        // Draw lines then points between them that were used as part of the descent to the
+        // global minimum.
+
+        // lots of nosiness between points, skip every 5 points for more dramatic deltas?
+        const skip = 10;
+        descent.forEach(([ax, ay], i) => {
+            if ((i % skip)) {
+                return;
+            }
+            const [x, y] = toCanvas(ax, ay);
+            // const [x, y] = [ax, ay];
+            if (i === 0) {
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+            }
+            ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = 'green';
+        ctx.stroke();
+
+        descent.forEach(([ax, ay], i) => {
+            if ((i % skip)) {
+                return;
+            }
+            const [x, y] = toCanvas(ax, ay);
+            // const [x, y] = [ax, ay];
+            ctx.beginPath();
+            ctx.arc(x, y, 12, 0, Math.PI * 2, false);
+            ctx.closePath();
+
+            ctx.fillStyle = 'blue';
+            ctx.strokeStyle = 'green';
+            ctx.fill();
+            ctx.stroke();
+        });
+    }
+
+    function main() {
+        const f = (x, y) => x ** 2 + y ** 2;
+        // easier to work with f in polar coordinates when we want to solve for k since k = r
+        // therefore:
+        // x = rcos(theta) = kcos(theta) 
+        // y = rsin(theta) = ksin(theta)
+        // and we just pick theta from [0, 2pi]
+        // of course this only works because x^2 + y^2 = z is the equation of a circle (or a
+        // paraboloid in R3 when z is not a constant, but since we're drawing the level curves
+        // it's fine).
+        const kf = (theta, k) => [k * Math.cos(theta), k * Math.sin(theta)];
+
+        // partials.
+        const dfdx = (x) => 2 * x;
+        const dfdy = (y) => 2 * y;
+        // gradient
+        const gf = (x, y) => [dfdx(x), dfdy(y)];
+        // the k values for the contour plot, going bigger because of scale.
+        const ks = [0, 80, 160, 240, 320];
+
+        setup();
+        drawContourPlot(ks, kf);
+        const descent = gradientDescent(gf);
+        drawDescent(descent);
+    }
+
+    main();
+    </script>
+</html>

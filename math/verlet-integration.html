@@ -1,0 +1,157 @@
+<html>
+    <head>
+        <title>Verlet Integration - Canvas</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                max-height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1024" width="1024"></canvas>
+        </section>        
+    </body>
+    <script>
+
+    // see:
+    // https://en.wikipedia.org/wiki/Verlet_integration
+
+    class Circle {
+        constructor({ index, x, y, r }) {
+            this.index = index;
+            this.x = x;
+            this.y = y;
+            this.r = r;
+            // 1kg
+            this.mass = 1.0;
+            this.drag = 0.1
+            // 2 m/s along y
+            this.velocityX = 0;
+            this.velocityY = 2;
+            // no acceleration to start
+            this.accelerationX = 0;
+            this.accelerationY = 0;
+        }
+
+        update(dt) {
+            // compute velocity verlet:
+            // https://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet
+
+            // dt, i.e. delta t, i.e. change in time.
+            const { accelerationX, accelerationY, velocityX, velocityY } = this;
+
+            // next position
+            const nextX = this.x + velocityX * dt + accelerationX * (dt * dt * 0.5);
+            const nextY = this.y + velocityY * dt + accelerationY * (dt * dt * 0.5);
+
+            // next acceleration
+            const [nextAccelerationX, nextAccelerationY] = this.applyForces();
+
+            // next velocity
+            const nextVelocityX = velocityX + (accelerationX + nextAccelerationX) * (dt * 0.5);
+            const nextVelocityY = velocityY + (accelerationY + nextAccelerationY) * (dt * 0.5);
+
+            // next position
+            this.x = nextX;
+            this.y = nextY;
+
+            // next velocity
+            this.velocityX = nextVelocityX;
+            this.velocityY = nextVelocityY;
+
+            // next acceleration
+            this.accelerationX = nextAccelerationX;
+            this.accelerationY = nextAccelerationY;
+
+            // if (this.index === 0) {
+            //     console.log(this.velocityX, this.velocityY)
+            // }
+        }
+
+        applyForces() {
+            // 9.81 m/s^2 down the y axis, +y is down so it's positive.
+            const gravityAccelerationX = 0;
+            const gravityAccelerationY = 9.81;
+
+            // compute drag forces.
+            const { drag, mass, velocityX, velocityY } = this;
+            const dragForceX = 0.5 * drag * (velocityX * velocityX);
+            const dragForceY = 0.5 * drag * (velocityY * velocityY);
+
+            // force = mass * acceleration, so acceleration = force/mass.
+            const dragAccelerationX = dragForceX / mass;
+            const dragAccelerationY = dragForceY / mass;
+
+            return [
+                gravityAccelerationX - dragAccelerationX,
+                gravityAccelerationY - dragAccelerationY,
+            ];
+        }
+    }
+
+    class Viz {
+        constructor({ circles }) {
+            this.canvas = document.getElementById('canvas');
+            this.ctx = canvas.getContext('2d');
+            this.circles = circles;
+        }
+
+        drawCircles() {
+            this.ctx.fillStyle = 'red';
+            this.ctx.strokeStyle = 'blue';
+            this.circles.forEach(({ x, y, r }) => {
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, r, 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.stroke();
+            });
+        }
+
+        update() {
+            const { canvas, ctx } = this;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            this.drawCircles();
+        }
+    }
+
+    const { width, height } = document.getElementById('canvas');
+
+    const circleRadius = 20;
+    const circleCount = Math.floor(canvas.width / (circleRadius * 2));
+    const circles = new Array(circleCount).fill(0).map((_, i) => new Circle({
+            index: i,
+            r: circleRadius,
+            x: (i + 1) * circleRadius * 2,
+            y: circleRadius,
+        })
+    );
+
+    const viz = new Viz({ circles });
+
+    let prevTimestamp = 0;
+    const update = (timestamp) => {
+        const dt = (timestamp - prevTimestamp) * 0.01;
+
+        circles.forEach(c => c.update(dt));
+        viz.update();
+
+        prevTimestamp = timestamp;
+        window.requestAnimationFrame(update);
+    }
+
+    window.requestAnimationFrame(update);
+
+    </script>
+</html>

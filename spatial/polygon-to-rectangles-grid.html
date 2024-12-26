@@ -1,0 +1,545 @@
+<html>
+    <head>
+        <title>Polygon -> Rectangles</title>
+        <style>
+            body {
+                background-color: black;
+                margin: 0;
+                padding: 0;
+            }
+            #main {
+                display: flex;
+                height: 100%;
+                justify-content: center;
+                align-items: center;
+            }
+            canvas {
+                max-height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <section id="main">
+            <canvas id="canvas" height="1280" width="1280"></canvas>
+        </section>
+    </body>
+    <script>
+
+    class MathTools {
+        static distance(p1, p2) {
+            const [x1, y1] = p1;
+            const [x2, y2] = p2;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            return d;
+        }
+
+        static midpoint(p1, p2) {
+            const [x1, y1] = p1;
+            const [x2, y2] = p2;
+            const mx = (x2 + x1) * 0.5;
+            const my = (y2 + y1) * 0.5;
+            return [mx, my];
+        }
+    };
+
+    class Segment {
+        constructor(p1, p2) {
+            this.start = p1;
+            this.end = p2;
+
+            const [x1, y1] = p1;
+            const [x2, y2] = p2;
+            const m = (y2 - y1) / (x2 - x1);
+            this.slope = m;
+
+            // Vertical segments should have a NaN slope.
+            this.orientation = this.slope === 0 ? 'h' : 'v';
+        }
+
+        intersects(rhs) {
+            // https://stackoverflow.com/a/1968345
+            // Ported from C to js.
+            const { start: p0, end: p1 }  = this;
+            const { start: p2, end: p3 }  = rhs;
+
+            const [p0x, p0y] = p0;
+            const [p1x, p1y] = p1;
+            const [p2x, p2y] = p2;
+            const [p3x, p3y] = p3;
+
+            let s1x = null;
+            let s1y = null;
+            let s2x = null;
+            let s2y = null;
+            let s = null;
+            let t = null;
+
+            s1x = p1x - p0x;
+            s1y = p1y - p0y;
+            s2x = p3x - p2x;
+            s2y = p3y - p2y;
+
+            s = (-s1y * (p0x - p2x) + s1x * (p0y - p2y)) / (-s2x * s1y + s1x * s2y);
+            t = ( s2x * (p0y - p2y) - s2y * (p0x - p2x)) / (-s2x * s1y + s1x * s2y);
+
+            if (s >= 0 && s <= 1 && t >= 0 && t <= 1) {
+                return [
+                    p0x + (t * s1x),
+                    p0y + (t * s1y),
+                ];
+            }
+            return null;
+        }
+    }
+
+    class Ray extends Segment {
+        constructor(p1, p2) {
+            super(p1, p2);
+        }
+    }
+
+    class Box {
+        constructor(x, y, width, height) {
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+
+            this.cx = x + width * 0.5;
+            this.cy = y + height * 0.5;
+
+            this.x1 = x;
+            this.x2 = x + width;
+            this.y1 = y;
+            this.y2 = y + height;
+        }
+
+        containtsPoint(p) {
+            const [px, py] = p;
+            const inX = this.x1 <= px && px <= this.x2;
+            const inY = this.y1 <= py && py <= this.y2;
+            return inX && inY;
+        }
+
+        // TODO
+        // Make this generate its own children for BVH
+        // const boundingVolumes = [
+        //         // Top left
+        //         new Box(x, y, width * 0.5, height * 0.5),
+        //         // Top right
+        //         new Box(x + width * 0.5, y, width * 0.5, height * 0.5),
+        //         new Box()
+        //         // Bottom left
+        //         // Bottom right
+        //     ];
+    }
+
+    class Polygon {
+        constructor(subdivisionCount) {
+            this.subdivisionCount = subdivisionCount;
+            this.restart();
+        }
+
+        addNextPoint(x, y) {
+            const { points } = this;
+            // Pointless if we don't have at least 3 points and we're adding a 4th (which would close a tri)
+            if (points.length < 3) {
+                this.points.push([x, y]);
+                return;
+            }
+            // Close shape if we're epsilon units away from x, y to any polygon point.
+            const epsilon = 20;
+
+            // Closing to the first point only.
+            const d = MathTools.distance([x, y], points[0]);
+            if (d < epsilon) {
+                this.close();
+            } else {
+                this.points.push([x, y]);
+            }
+        }
+
+        createSegments() {
+            // Creates segments from points that are easy to work with.
+            // we need to be able to get the slope since we only want infinite or 0 sloped
+            // lines (those form the square).
+            for (let i = 0; i < this.points.length - 1; i++) {
+                const segment = new Segment(
+                    this.points[i],
+                    this.points[i + 1],
+                );
+                this.segments.push(segment);
+            }
+            if (this.segments.length + 1 !== this.points.length) {
+                throw new Error("Mismatched segments for points.");
+            }
+
+            // TODO
+            // It would help to track whcih segments are attached to which point (vertex)
+            // so that we can trace out from them and build rectangles afterwards.
+        }
+
+        createBoundingBox() {
+            let minX = null;
+            let maxX = null;
+            let minY = null;
+            let maxY = null;
+            this.points.forEach(([x, y]) => {
+                if (!minX || x < minX) {
+                    minX = x;
+                }
+
+                if (!maxX || x > maxX) {
+                    maxX = x;
+                }
+
+                if (!minY || y < minY) {
+                    minY = y;
+                }
+
+                if (!maxY || y > maxY) {
+                    maxY = y;
+                }
+            });
+
+            const width = maxX - minX;
+            const height = maxY - minY;
+            this.boundingBox = {
+                x: minX,
+                y: minY,
+                width,
+                height,
+            };
+        }
+
+        close() {
+            this.closed = true;
+            // Close at the nearest point
+            this.points.push(this.points[0]);
+            // Find bounding box
+            this.createBoundingBox();
+            this.createSegments();
+            this.subdivide();
+        }
+
+        addRays() {
+            const { x, y, width, height } = this.boundingBox;
+            const boxWidth = width / this.subdivisionCount;
+            const boxHeight = height / this.subdivisionCount;
+
+            // Cast 'count' rays first, top to bottom, and left to right.
+            // These rays will go through the edge segments of the box.   
+            // These are rays travelling horizontally.
+            for (let i = y; i < y + height; i += boxHeight) {
+                const ray = new Ray(
+                    [x, i],
+                    [x + width, i],
+                );
+                this.rays.push(ray);
+            }
+
+            // These are rays travelling vertically.
+            for (let i = x; i < x + width; i += boxWidth) {
+                const ray = new Ray(
+                    [i, y],
+                    [i, y + height],
+                );
+                this.rays.push(ray);
+            }
+        }
+
+        addCollisionPoints() {
+            this.collisionPoints = this.points.map(p => p);            
+            this.rays.forEach(ray => {
+                this.segments.forEach(segment => {
+                    const collisionPoint = ray.intersects(segment);
+                    if (collisionPoint) {
+                        this.collisionPoints.push(collisionPoint);
+                    }
+                });
+            });
+        }
+
+        addBoxes() {
+            const { x, y, width, height } = this.boundingBox;
+            const boxWidth = width / this.subdivisionCount;
+            const boxHeight = height / this.subdivisionCount;
+
+            // TODO
+            // Add BVHs to test point-in-box faster (since precomputing the box indices is too error-prone?)
+            // const root = new Box(x, y, width, height);            
+
+            let index = 0;
+            let row = 0;
+            let column = 0;
+
+            for (let j = y; j < y + height; j += boxHeight) {
+                for (let i = x; i < x + width; i += boxWidth) {
+                    const box = new Box(i, j, boxWidth, boxHeight);
+                    box.index = index;
+                    box.row = row;
+                    box.column = column;
+                    column++;
+                    index++;
+                    // FIXME
+                    // It's too slow to check each box against each point, so it would be nice to compute
+                    // the box index containing a point up front. It's challenging because points can
+                    // sit on the edge between multiple boxes (since the rays we're casting follow the box
+                    // edges).
+                    // if (this.collisionPointIndicies.has(index)) {
+                    //     box.hit = true;
+                    // }
+                    // Instead, use bounding volumes of parent boxes to discard entire groups of boxes
+                    // when testing for points.
+                    this.collisionPoints.forEach(p => {
+                        if (box.containtsPoint(p)) {
+                            box.hit = true;
+                            // if (!this.collisionPointIndicies.has(index)) {
+                            //     // Test if we indexed properly, if not, find out why...
+                            //     const estimatedIndex = this.collisionPointToBoxIndex(p);
+                            // }
+                        }
+                    })
+                    this.boxes.push(box);
+                }
+                row++;
+                column = 0;
+            }
+        }
+
+        removeBoxes() {
+            // Remove any box that isn't in the polygon
+            // Using a centre point check on each box to discard those that aren't
+            // in the polygon.
+            // Not sure if there is a cheaper way to do this.
+
+            // https://www.algorithms-and-technologies.com/point_in_polygon/javascript
+            /**
+             * Performs the even-odd-rule Algorithm (a raycasting algorithm) to find out whether a point is in a given polygon.
+             * This runs in O(n) where n is the number of edges of the polygon.
+             *
+             * @param {Array} polygon an array representation of the polygon where polygon[i][0] is the x Value of the i-th point and polygon[i][1] is the y Value.
+             * @param {Array} point   an array representation of the point where point[0] is its x Value and point[1] is its y Value
+             * @return {boolean} whether the point is in the polygon (not on the edge, just turn < into <= and > into >= for that)
+             */
+            const pointInPolygon = function (polygon, point) {
+                //A point is in a polygon if a line from the point to infinity crosses the polygon an odd number of times
+                let odd = false;
+                //For each edge (In this case for each point of the polygon and the previous one)
+                for (let i = 0, j = polygon.length - 1; i < polygon.length; i++) {
+                    //If a line from the point into infinity crosses this edge
+                    if (((polygon[i][1] > point[1]) !== (polygon[j][1] > point[1])) // One point needs to be above, one below our y coordinate
+                        // ...and the edge doesn't cross our Y corrdinate before our x coordinate (but between our x coordinate and infinity)
+                        && (point[0] < ((polygon[j][0] - polygon[i][0]) * (point[1] - polygon[i][1]) / (polygon[j][1] - polygon[i][1]) + polygon[i][0]))) {
+                        // Invert odd
+                        odd = !odd;
+                    }
+                    j = i;
+
+                }
+                //If the number of crossings was odd, the point is in the polygon
+                return odd;
+            };
+
+            this.boxes.forEach(box => {
+                if (!pointInPolygon(this.points, [box.cx, box.cy])) {
+                    box.hit = true;
+                }
+            });
+        }
+
+        subdivide() {
+            // 1. Get a bounding box around the polygon.
+            // 2. Pick some subdivision of the bounding box.
+            // 3. At half-subdivision width intervals (e.g. if subdivision is 10, go 5, 15),
+            //  cast rays horizontally and vertically.
+            // 4. Test each ray cast for an intersection with the polygon. If the ray
+            //  intersected, add the point to a list of collision points.
+            // 5. Now draw boxes at the subdivison size (e.g. if it's 10, 10x10 boxes)
+            //  across the entire bounding box. While making these, test them to see if
+            //  one of the intersection points are inside.
+            // 6. If the intersection is in the box, we discard this box from our
+            //  final shape since it's overtop the polygon edge.
+            console.time("algo");
+            this.addRays();
+            this.addCollisionPoints();
+            this.addBoxes();
+            this.removeBoxes();
+            console.timeEnd("algo");
+        }
+
+        restart() {
+            this.closed = false;
+            this.points = [];
+            this.segments = [];
+            this.collisionPoints = [];
+            this.rays = [];
+            this.boxes = [];
+        }
+    }
+
+    class Viz {
+        constructor(polygon) {
+            this.canvas = document.getElementById('canvas');
+            this.ctx = canvas.getContext('2d');
+            this.polygon = polygon;
+
+            this.canvas.onclick = this.handleClick;
+            this.clear();
+        }
+        
+        handleClick = (e) => {
+            if (this.polygon.closed) {
+                // Restart the shape with a new one if we're drawing again after closing.
+                this.polygon.restart();
+            }
+            
+            const { closed, polygon } = this.polygon;
+            const { x, y } = e.target.getBoundingClientRect();
+            const { layerX, layerY } = e;
+            // Local coordinates - probably a better way but whatever.
+            const cx = layerX - x;
+            const cy = layerY - y;
+            this.polygon.addNextPoint(cx, cy);
+            this.update();
+        };
+
+        clear() {
+            const { canvas, ctx } = this;
+            const { width, height } = canvas;
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        drawPolygon() {
+            const { ctx } = this;
+            const { closed, points } = this.polygon;
+            ctx.beginPath();
+            points.forEach((p, i) => {
+                const [x, y] = p;
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+                ctx.arc(x, y, 2, 0, Math.PI * 2);
+            });
+            ctx.strokeStyle = closed ? 'green' : 'blue';
+            ctx.fillStyle = closed ? 'rgba(0, 255, 0, 0.2)' : 'transparent';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+            ctx.fill();
+
+            // Circle at each point of the points.
+            points.forEach((p, i) => {
+                const [x, y] = p;
+                ctx.beginPath();
+                // Circle at each point of the points.
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'red';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 3;
+                ctx.fill();
+                ctx.stroke();
+            });
+        }
+
+        drawCollisionPoints() {
+            if (!this.polygon.closed) {
+                return;
+            }
+            const { collisionPoints } = this.polygon;
+            const { ctx } = this;         
+
+            collisionPoints.forEach(p => {
+                const [x, y] = p;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'yellow';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 3;
+                ctx.fill();
+                ctx.stroke();
+            });
+        }
+
+        drawRays() {
+            if (!this.polygon.closed) {
+                return;
+            }
+            const { rays } = this.polygon;
+            const { ctx } = this;
+
+            rays.forEach(ls => {
+                // const fillPoint = (p) => {
+                //     const [x, y] = p;
+                //     ctx.beginPath();
+                //     ctx.arc(x, y, 4, 0, Math.PI * 2);
+                //     ctx.fillStyle = 'red';
+                //     ctx.strokeStyle = 'black';
+                //     ctx.lineWidth = 3;
+                //     ctx.fill();
+                //     ctx.stroke();
+                // }
+
+                const { start: p1, end: p2 } = ls;
+                ctx.beginPath();
+                ctx.moveTo(p1[0], p1[1]);
+                ctx.lineTo(p2[0], p2[1]);
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // fillPoint(p1);
+                // fillPoint(p2);
+            });
+        }
+
+        drawBoxes() {
+            if (!this.polygon.closed) {
+                return;
+            }
+            const { boxes } = this.polygon;
+            const { ctx } = this;
+
+            boxes.forEach(box => {
+                if (box.hit) {
+                    return;
+                }
+                ctx.beginPath();
+                ctx.rect(box.x, box.y, box.width, box.height);
+                ctx.strokeStyle = 'blue';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                if (box.hit || box.fakeHit) {
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                    ctx.fill();
+                }
+
+                ctx.beginPath();
+                ctx.font = '12px serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = 'orange';
+                ctx.fillText(box.index, box.cx, box.cy);
+            });
+        }
+
+        // Add polygon drawing...
+        update() {
+            this.clear();
+            this.drawPolygon();
+            // this.drawCollisionPoints();
+            // this.drawRays();
+            this.drawBoxes();
+        }
+    }
+
+    const polygon = new Polygon(50);
+    const viz = new Viz(polygon);
+
+    </script>
+</html>
